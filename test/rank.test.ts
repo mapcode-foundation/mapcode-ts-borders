@@ -99,6 +99,20 @@ describe("encodeWithBorders", () => {
     );
   });
 
+  it("accepts a Point from another class that has the same getters", () => {
+    const lookalike = {
+      getLatDeg: () => 51.4436,
+      getLonDeg: () => 4.9326,
+    } as unknown as Point;
+    const result = encodeWithBorders(lookalike, borders);
+    expect(result.territories.map((m) => m.territory.toString())).toEqual(["NLD"]);
+    expect(labels(result.mapcodes)).toEqual(labels(encodeWithBorders(51.4436, 4.9326, borders).mapcodes));
+  });
+
+  it("rejects an undefined Point", () => {
+    expect(() => encodeWithBorders(Point.undefined(), borders)).toThrow();
+  });
+
   it("has no best outside every border", () => {
     const result = encodeWithBorders(54, 3, borders);
     expect(result.territories).toEqual([]);

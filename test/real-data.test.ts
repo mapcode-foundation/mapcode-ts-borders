@@ -55,6 +55,10 @@ describe("real border data", () => {
     expect(labels).toEqual(ranked ?? encode(lat, lon).map((m) => m.getCodeWithTerritory()));
   });
 
+  it("records where the data came from", () => {
+    expect(borders.getSource()).toEqual({ name: "OpenStreetMap", snapshotDate: "2026-05" });
+  });
+
   it("lifts Los Angeles to its country", () => {
     expect(borders.getCountry(34.0522, -118.2437)?.toString()).toBe("USA");
   });

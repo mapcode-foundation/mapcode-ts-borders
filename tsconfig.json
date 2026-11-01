@@ -5,13 +5,11 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2020"],
     "strict": true,
-    "declaration": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "dist",
     "types": ["node"]
   },
   "include": ["src", "scripts", "test"]

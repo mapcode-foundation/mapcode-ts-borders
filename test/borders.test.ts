@@ -28,6 +28,13 @@ const make = (features: BorderFeature[]): Borders => Borders.fromBytes(serialize
 const codes = (b: Borders, lat: number, lon: number): string[] =>
   b.getTerritories(lat, lon).map((m) => m.territory.toString());
 
+class PointLookalike {
+  constructor(private readonly lat: number, private readonly lon: number) {}
+  getLatDeg(): number { return this.lat; }
+  getLonDeg(): number { return this.lon; }
+}
+const lookalike = (lat: number, lon: number): Point => new PointLookalike(lat, lon) as unknown as Point;
+
 const fixture = make([
   { alphaCode: "NLD", adminLevel: 2, area: 100, polygons: [[box(0, 50, 10, 60)]] },
   { alphaCode: "USA", adminLevel: 2, area: 1000, polygons: [[box(-130, 30, -100, 50)]] },
@@ -49,6 +56,40 @@ describe("pointInRing", () => {
 
   it("rejects a ring with fewer than 3 vertices", () => {
     expect(pointInRing(new Float64Array([0, 0, 1, 1]), 0, 2, 0, 0)).toBe(false);
+  });
+
+  // Expected values come from running the REST service's BoundaryService.pointInRing on the same input.
+  const rest: Record<string, { ring: number[]; points: [number, number, boolean][] }> = {
+    square: {
+      ring: [0, 0, 10, 0, 10, 10, 0, 10, 0, 0],
+      points: [
+        [0, 5, true], [10, 5, false], [5, 0, true], [5, 10, false],
+        [0, 0, true], [10, 0, false], [10, 10, false], [0, 10, false],
+        [-5, 0, false], [15, 0, false], [-5, 10, false], [15, 10, false],
+        [5, 5, true], [11, 5, false],
+      ],
+    },
+    triangle: {
+      ring: [0, 0, 10, 0, 5, 10, 0, 0],
+      points: [
+        [0, 0, true], [10, 0, false], [5, 10, false], [5, 0, true], [2.5, 5, true],
+        [7.5, 5, false], [-1, 0, false], [11, 0, false], [0, 5, false],
+      ],
+    },
+    concave: {
+      ring: [0, 0, 10, 0, 10, 10, 5, 4, 0, 10, 0, 0],
+      points: [
+        [5, 4, true], [5, 5, false], [5, 3.999, true], [2, 6, true],
+        [5, 10, false], [0, 10, false], [10, 10, false], [5, 7, false],
+      ],
+    },
+  };
+
+  describe.each(Object.entries(rest))("parity with the REST service on a %s", (_name, { ring, points }) => {
+    const coords = new Float64Array(ring);
+    it.each(points)("lon %d, lat %d is inside: %s", (lon, lat, expected) => {
+      expect(pointInRing(coords, 0, ring.length / 2, lon, lat)).toBe(expected);
+    });
   });
 });
 
@@ -114,6 +155,52 @@ describe("Borders.getTerritories", () => {
     const matches = fixture.getTerritories(Point.fromDeg(36, -120));
     expect(matches.map((m) => m.territory.toString())).toEqual(["US-CA", "USA"]);
   });
+
+  it("accepts a Point from another class that has the same getters", () => {
+    expect(fixture.getTerritories(lookalike(36, -120)).map((m) => m.territory.toString())).toEqual(["US-CA", "USA"]);
+  });
+
+  it("treats longitude 180 like -180", () => {
+    const dateline = make([{ alphaCode: "FJI", adminLevel: 2, area: 1, polygons: [[box(-180, -20, -170, -10)]] }]);
+    expect(codes(dateline, -15, 180)).toEqual(["FJI"]);
+    expect(codes(dateline, -15, 180)).toEqual(codes(dateline, -15, -180));
+  });
+
+  it("treats the south and west edges as inside and the north and east edges as outside", () => {
+    expect(codes(fixture, 50, 5)).toEqual(["NLD"]);
+    expect(codes(fixture, 55, 0)).toEqual(["NLD"]);
+    expect(codes(fixture, 60, 5)).toEqual([]);
+    expect(codes(fixture, 55, 10)).toEqual([]);
+  });
+
+  it("never matches a polygon whose first ring is empty", () => {
+    const b = make([
+      { alphaCode: "FRA", adminLevel: 2, area: 1, polygons: [[[], box(0, 0, 10, 10)]] },
+      { alphaCode: "ESP", adminLevel: 2, area: 100, polygons: [[box(0, 0, 10, 10)]] },
+    ]);
+    expect(codes(b, 5, 5)).toEqual(["ESP"]);
+  });
+
+  it("does not change when the input buffer is mutated after loading", () => {
+    const bytes = serialize(buildTables([
+      { alphaCode: "NLD", adminLevel: 2, area: 100, polygons: [[box(0, 50, 10, 60)]] },
+    ], source));
+    const b = Borders.fromBytes(bytes);
+    bytes.fill(0);
+    expect(codes(b, 55, 5)).toEqual(["NLD"]);
+    expect(b.getSource()).toEqual(source);
+  });
+
+  it("loads a Node Buffer at a misaligned offset", () => {
+    const good = serialize(buildTables([
+      { alphaCode: "NLD", adminLevel: 2, area: 100, polygons: [[box(0, 50, 10, 60)]] },
+    ], source));
+    const backing = Buffer.alloc(good.length + 3);
+    backing.set(good, 3);
+    const misaligned = backing.subarray(3);
+    expect(misaligned.byteOffset % 8).not.toBe(0);
+    expect(codes(Borders.fromBytes(misaligned), 55, 5)).toEqual(["NLD"]);
+  });
 });
 
 describe("Borders.getCountry", () => {
@@ -131,6 +218,17 @@ describe("Borders.getCountry", () => {
 
   it("accepts a Point", () => {
     expect(fixture.getCountry(Point.fromDeg(36, -120))?.toString()).toBe("USA");
+  });
+
+  it("accepts a Point from another class that has the same getters", () => {
+    expect(fixture.getCountry(lookalike(36, -120))?.toString()).toBe("USA");
+  });
+});
+
+describe("Borders.getSource", () => {
+  it("returns the recorded source as a frozen object", () => {
+    expect(fixture.getSource()).toEqual(source);
+    expect(Object.isFrozen(fixture.getSource())).toBe(true);
   });
 });
 
