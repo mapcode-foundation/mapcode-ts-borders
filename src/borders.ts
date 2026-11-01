@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import { Point, Territory } from "mapcode-ts";
+import { parseAlphaCode } from "./alpha-code.js";
 import { BordersFormatError, deserialize, type BorderTables, type BordersSource } from "./format.js";
 
 export interface BorderMatch {
@@ -69,11 +70,11 @@ export class Borders {
   static fromBytes(bytes: Uint8Array): Borders {
     const tables = deserialize(bytes);
     const territories = tables.alphaCodes.map((code) => {
-      try {
-        return Territory.fromString(code);
-      } catch {
+      const territory = parseAlphaCode(code);
+      if (territory === null) {
         throw new BordersFormatError(`Unknown territory code in borders data: ${code}`);
       }
+      return territory;
     });
     return new Borders(tables, territories);
   }
