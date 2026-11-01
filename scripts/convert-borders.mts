@@ -15,9 +15,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { geojson } from "flatgeobuf";
-import { Territory } from "mapcode-ts";
+import { parseAlphaCode } from "../src/alpha-code.ts";
 import { buildTables, serialize, SNAPSHOT_DATE_PATTERN, type BorderFeature } from "../src/format.ts";
 
+// flatgeobuf's IGeoJsonFeature is not exported and its GeoJSON types are not installed.
 interface GeoJsonFeature {
   geometry: { type: string; coordinates: unknown } | null;
   properties: Record<string, unknown> | null;
@@ -45,43 +46,75 @@ if (snapshotDate === undefined || !SNAPSHOT_DATE_PATTERN.test(snapshotDate)) {
 const input = readFileSync(inPath);
 const features: BorderFeature[] = [];
 const offenders: string[] = [];
+const seen = new Set<string>();
 
+function checkCoordinates(label: string, polygons: number[][][][]): void {
+  let nonFinite = false;
+  let outOfRange = false;
+  for (const polygon of polygons) {
+    for (const ring of polygon) {
+      for (const position of ring) {
+        const [lon, lat] = position;
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+          if (!nonFinite) offenders.push(`${label}: non-finite coordinate [${position}]`);
+          nonFinite = true;
+        } else if (lon < -180 || lon > 180 || lat < -90 || lat > 90) {
+          if (!outOfRange) offenders.push(`${label}: coordinate out of range [${position}]`);
+          outOfRange = true;
+        }
+      }
+    }
+  }
+}
+
+let index = 0;
 for await (const raw of geojson.deserialize(new Uint8Array(input.buffer, input.byteOffset, input.byteLength))) {
   const feature = raw as unknown as GeoJsonFeature;
-  const geometry = feature.geometry;
-  const props = feature.properties ?? {};
-  const { alphaCode, adminLevel, area, parentAlphaCode } = props;
-  if (!geometry || typeof alphaCode !== "string" || alphaCode.length === 0) continue;
-  if (typeof adminLevel !== "number" || !Number.isFinite(adminLevel)) continue;
-  if (typeof area !== "number" || !Number.isFinite(area)) continue;
-  let polygons: number[][][][];
-  if (geometry.type === "Polygon") {
-    polygons = [geometry.coordinates as number[][][]];
-  } else if (geometry.type === "MultiPolygon") {
-    polygons = geometry.coordinates as number[][][][];
-  } else {
+  index++;
+  const { alphaCode, adminLevel, area, parentAlphaCode } = feature.properties ?? {};
+  if (typeof alphaCode !== "string" || alphaCode.length === 0) {
+    offenders.push(`feature #${index}: missing or invalid alphaCode`);
     continue;
   }
-
-  try {
-    const territory = Territory.fromString(alphaCode);
-    if (territory.toString() !== alphaCode) {
-      offenders.push(`${alphaCode}: parses as ${territory.toString()}`);
-    }
+  const label = `${alphaCode} (feature #${index})`;
+  const territory = parseAlphaCode(alphaCode);
+  if (territory === null) {
+    offenders.push(`${label}: unknown or non-canonical alpha code`);
+  } else {
     const expectedParent = territory.getParentTerritory()?.toString() ?? null;
     const fileParent = typeof parentAlphaCode === "string" && parentAlphaCode.length > 0 ? parentAlphaCode : null;
     if (fileParent !== expectedParent) {
-      offenders.push(`${alphaCode}: parent is ${fileParent} in the file, ${expectedParent} in mapcode-ts`);
+      offenders.push(`${label}: parent is ${fileParent} in the file, ${expectedParent} in mapcode-ts`);
     }
-  } catch {
-    offenders.push(`${alphaCode}: unknown territory`);
+  }
+  if (seen.has(alphaCode)) {
+    offenders.push(`${label}: duplicate alphaCode`);
+  }
+  seen.add(alphaCode);
+  if (typeof adminLevel !== "number" || !Number.isInteger(adminLevel) || adminLevel < 0 || adminLevel > 255) {
+    offenders.push(`${label}: adminLevel is not an integer in 0..255: ${adminLevel}`);
+  }
+  if (typeof area !== "number" || !Number.isFinite(area)) {
+    offenders.push(`${label}: area is not a finite number: ${area}`);
   }
 
-  features.push({ alphaCode, adminLevel: Math.trunc(adminLevel), area, polygons });
+  const geometry = feature.geometry;
+  let polygons: number[][][][];
+  if (geometry?.type === "Polygon") {
+    polygons = [geometry.coordinates as number[][][]];
+  } else if (geometry?.type === "MultiPolygon") {
+    polygons = geometry.coordinates as number[][][][];
+  } else {
+    offenders.push(`${label}: geometry is ${geometry?.type ?? "missing"}, not Polygon or MultiPolygon`);
+    continue;
+  }
+  checkCoordinates(label, polygons);
+
+  features.push({ alphaCode, adminLevel: adminLevel as number, area: area as number, polygons });
 }
 
 if (offenders.length > 0) {
-  console.error(`${offenders.length} feature(s) do not match mapcode-ts:`);
+  console.error(`${offenders.length} problem(s) in ${inPath}:`);
   for (const line of offenders) console.error(`  ${line}`);
   process.exit(1);
 }
