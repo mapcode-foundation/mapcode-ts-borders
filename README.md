@@ -51,7 +51,7 @@ const { mapcodes, best } = rankByBorders(encodeRestrictToCountryISO(lat, lon, "N
 
 ## Browsers and bundlers
 
-The package has no `node:` imports. `bordersUrl` is built with `new URL("../data/borders.mcb", import.meta.url)`, which Vite, webpack 5 and esbuild with a file loader treat as an asset reference. Fetch it and pass the bytes on.
+The package has no `node:` imports. `bordersUrl` is built with the standard `new URL("../data/borders.mcb", import.meta.url)` pattern. A bundler that supports this pattern copies the file as an asset. If yours does not, serve `borders.mcb` yourself and fetch it from your own URL. This has not been tested with specific bundlers yet.
 
 ```ts
 import { Borders, bordersUrl } from "mapcode-ts-borders";

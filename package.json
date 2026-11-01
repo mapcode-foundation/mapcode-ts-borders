@@ -44,7 +44,7 @@
     "prepublishOnly": "npm run build"
   },
   "engines": { "node": ">=20" },
-  "license": "Apache-2.0",
+  "license": "Apache-2.0 AND ODbL-1.0",
   "peerDependencies": {
     "mapcode-ts": "^1.0.3"
   },
