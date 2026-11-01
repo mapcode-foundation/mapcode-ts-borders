@@ -1,0 +1,65 @@
+{
+  "name": "mapcode-ts-borders",
+  "version": "1.0.0",
+  "description": "OpenStreetMap administrative border lookups for mapcode-ts: find the territory of a point and rank mapcodes by it.",
+  "keywords": [
+    "mapcode",
+    "borders",
+    "openstreetmap",
+    "osm",
+    "territory",
+    "point-in-polygon",
+    "geocoding",
+    "latitude",
+    "longitude"
+  ],
+  "homepage": "https://github.com/mapcode-foundation/mapcode-ts-borders#readme",
+  "bugs": {
+    "url": "https://github.com/mapcode-foundation/mapcode-ts-borders/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mapcode-foundation/mapcode-ts-borders.git"
+  },
+  "author": "Rijn Buve <rijn@buve.nl>",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./borders.mcb": "./data/borders.mcb"
+  },
+  "files": ["dist", "data/borders.mcb", "NOTICE"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "gen:borders": "node --experimental-strip-types scripts/convert-borders.mts",
+    "check:dist": "npm run build && node scripts/check-dist.mjs",
+    "prepublishOnly": "npm run check:dist"
+  },
+  "engines": { "node": ">=20" },
+  "license": "Apache-2.0 AND ODbL-1.0",
+  "peerDependencies": {
+    "mapcode-ts": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "flatgeobuf": "^4.6.1",
+    "mapcode-ts": "1.0.3",
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
+  }
+}
