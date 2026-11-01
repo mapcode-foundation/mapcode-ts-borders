@@ -1,0 +1,17 @@
+-------------------------------------------------------------------------------
+MAPCODE TYPESCRIPT BORDERS LIBRARY
+-------------------------------------------------------------------------------
+
+Administrative border lookups on top of the mapcode-ts library, by Rijn Buve.
+
+Copyright (C) 2026, Stichting Mapcode Foundation (http://www.mapcode.com)
+
+-------------------------------------------------------------------------------
+BORDER DATA
+-------------------------------------------------------------------------------
+
+The border data in data/borders.mcb is derived from OpenStreetMap.
+
+Contains information from OpenStreetMap, (C) OpenStreetMap contributors,
+available under the Open Database License (ODbL) 1.0.
+See https://www.openstreetmap.org/copyright for details.
