@@ -40,11 +40,11 @@ Lookups take about 60 µs. `Borders` is read-only after loading, so share it bet
 If you already have mapcodes, for example from `encodeRestrictToCountryISO`, rank them yourself.
 
 ```ts
-import { encode, encodeRestrictToCountryISO } from "mapcode-ts";
+import { encodeRestrictToCountryISO } from "mapcode-ts";
 import { rankByBorders } from "mapcode-ts-borders";
 
 const matches = borders.getTerritories(lat, lon);
-const { mapcodes, best } = rankByBorders(encode(lat, lon), matches);
+const { mapcodes, best } = rankByBorders(encodeRestrictToCountryISO(lat, lon, "NLD"), matches);
 ```
 
 `rankByBorders` returns a new array. Mapcodes in the most specific matching territory come first, then those in the next one, and mapcodes in territories the point is not in come last in their original order. `best` is the first mapcode in the top-ranked territory, or `null` when there is none.
