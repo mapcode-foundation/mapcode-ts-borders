@@ -32,9 +32,9 @@ describe("borders format", () => {
     const original = buildTables(features);
     const copy = deserialize(serialize(original));
     expect(copy).toEqual(original);
-    expect(copy.featureCount).toBe(3);
-    expect(copy.polygonCount).toBe(4);
-    expect(copy.ringCount).toBe(5);
+    expect(copy.alphaCodes.length).toBe(3);
+    expect(copy.polyRingStart.length - 1).toBe(4);
+    expect(copy.ringOffsets.length - 1).toBe(5);
   });
 
   it("reads input at a misaligned byte offset", () => {
@@ -87,8 +87,8 @@ describe("borders format", () => {
       { alphaCode: "NLD", adminLevel: 2, area: 100, polygons: [[[]], [square(0, 0, 10)]] },
     ]);
     expect(tables.alphaCodes).toEqual(["NLD"]);
-    expect(tables.polygonCount).toBe(1);
-    expect(tables.ringCount).toBe(1);
+    expect(tables.polyRingStart.length - 1).toBe(1);
+    expect(tables.ringOffsets.length - 1).toBe(1);
   });
 
   it("refuses to build from no usable feature", () => {

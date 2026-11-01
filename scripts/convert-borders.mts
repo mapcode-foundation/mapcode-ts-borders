@@ -75,4 +75,4 @@ if (offenders.length > 0) {
 const tables = buildTables(features);
 const bytes = serialize(tables);
 writeFileSync(outPath, bytes);
-console.log(`Wrote ${outPath}: ${tables.featureCount} features, ${tables.vertexCount} vertices, ${bytes.length} bytes`);
+console.log(`Wrote ${outPath}: ${tables.alphaCodes.length} features, ${tables.coords.length / 2} vertices, ${bytes.length} bytes`);

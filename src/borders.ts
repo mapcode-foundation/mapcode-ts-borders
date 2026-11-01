@@ -79,7 +79,8 @@ export class Borders {
   getTerritories(arg0: number | Point, arg1?: number): BorderMatch[] {
     const [lat, rawLon] = arg0 instanceof Point ? [arg0.getLatDeg(), arg0.getLonDeg()] : [arg0, arg1 as number];
     const lon = wrapLon(rawLon);
-    const { featureCount, bbox, adminLevel, area } = this.tables;
+    const { bbox, adminLevel, area } = this.tables;
+    const featureCount = this.territories.length;
     const hits: number[] = [];
     for (let f = 0; f < featureCount; f++) {
       const b = f * 4;

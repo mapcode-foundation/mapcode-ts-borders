@@ -20,10 +20,6 @@ export interface BorderFeature {
 }
 
 export interface BorderTables {
-  featureCount: number;
-  polygonCount: number;
-  ringCount: number;
-  vertexCount: number;
   coords: Float64Array;
   area: Float64Array;
   bbox: Float64Array;
@@ -65,7 +61,7 @@ interface Layout {
   total: number;
 }
 
-const align8 = (n: number): number => (n + 7) & ~7;
+const align8 = (n: number): number => Math.ceil(n / 8) * 8;
 
 function layout(c: Counts): Layout {
   const coords = HEADER_BYTES;
@@ -87,62 +83,47 @@ function isLittleEndian(): boolean {
 }
 
 export function buildTables(features: readonly BorderFeature[]): BorderTables {
-  const coordsList: number[] = [];
-  const ringOffsetsList: number[] = [0];
-  const polyRingStartList: number[] = [0];
-  const featurePolyStartList: number[] = [0];
+  const coords: number[] = [];
+  const ringOffsets: number[] = [0];
+  const polyRingStart: number[] = [0];
+  const featurePolyStart: number[] = [0];
   const alphaCodes: string[] = [];
-  const adminLevelList: number[] = [];
-  const areaList: number[] = [];
-  const bboxList: number[] = [];
-
-  let ringCount = 0;
-  let polyCount = 0;
-  let vertexCount = 0;
+  const adminLevel: number[] = [];
+  const area: number[] = [];
+  const bbox: number[] = [];
 
   for (const feature of features) {
+    const polygons = feature.polygons.filter((polygon) => polygon.length > 0 && polygon[0].length > 0);
+    if (polygons.length === 0) continue;
+    if (feature.alphaCode.includes("\n")) {
+      throw new BordersFormatError(`Alpha code contains a newline: ${JSON.stringify(feature.alphaCode)}`);
+    }
+    if (!Number.isInteger(feature.adminLevel) || feature.adminLevel < 0 || feature.adminLevel > 255) {
+      throw new BordersFormatError(`Admin level of ${feature.alphaCode} is not an integer in 0..255: ${feature.adminLevel}`);
+    }
+
     let minLon = Infinity;
     let minLat = Infinity;
     let maxLon = -Infinity;
     let maxLat = -Infinity;
-    const polyCountBefore = polyCount;
-
-    for (const polygon of feature.polygons) {
-      const ringCountBefore = ringCount;
-      const vertexCountBefore = vertexCount;
-      const coordsLengthBefore = coordsList.length;
-      const ringOffsetsLengthBefore = ringOffsetsList.length;
+    for (const polygon of polygons) {
       for (const ring of polygon) {
         for (const [lon, lat] of ring) {
-          coordsList.push(lon, lat);
-          vertexCount++;
+          coords.push(lon, lat);
           if (lon < minLon) minLon = lon;
           if (lon > maxLon) maxLon = lon;
           if (lat < minLat) minLat = lat;
           if (lat > maxLat) maxLat = lat;
         }
-        ringCount++;
-        ringOffsetsList.push(vertexCount);
+        ringOffsets.push(coords.length / 2);
       }
-      if (vertexCount === vertexCountBefore) {
-        ringCount = ringCountBefore;
-        coordsList.length = coordsLengthBefore;
-        ringOffsetsList.length = ringOffsetsLengthBefore;
-        continue;
-      }
-      polyCount++;
-      polyRingStartList.push(ringCount);
+      polyRingStart.push(ringOffsets.length - 1);
     }
-
-    if (polyCount === polyCountBefore) continue;
-    if (feature.alphaCode.includes("\n")) {
-      throw new BordersFormatError(`Alpha code contains a newline: ${JSON.stringify(feature.alphaCode)}`);
-    }
-    featurePolyStartList.push(polyCount);
+    featurePolyStart.push(polyRingStart.length - 1);
     alphaCodes.push(feature.alphaCode);
-    adminLevelList.push(feature.adminLevel);
-    areaList.push(feature.area);
-    bboxList.push(minLon, minLat, maxLon, maxLat);
+    adminLevel.push(feature.adminLevel);
+    area.push(feature.area);
+    bbox.push(minLon, minLat, maxLon, maxLat);
   }
 
   if (alphaCodes.length === 0) {
@@ -150,17 +131,13 @@ export function buildTables(features: readonly BorderFeature[]): BorderTables {
   }
 
   return {
-    featureCount: alphaCodes.length,
-    polygonCount: polyCount,
-    ringCount,
-    vertexCount,
-    coords: Float64Array.from(coordsList),
-    area: Float64Array.from(areaList),
-    bbox: Float64Array.from(bboxList),
-    featurePolyStart: Uint32Array.from(featurePolyStartList),
-    polyRingStart: Uint32Array.from(polyRingStartList),
-    ringOffsets: Uint32Array.from(ringOffsetsList),
-    adminLevel: Uint8Array.from(adminLevelList),
+    coords: Float64Array.from(coords),
+    area: Float64Array.from(area),
+    bbox: Float64Array.from(bbox),
+    featurePolyStart: Uint32Array.from(featurePolyStart),
+    polyRingStart: Uint32Array.from(polyRingStart),
+    ringOffsets: Uint32Array.from(ringOffsets),
+    adminLevel: Uint8Array.from(adminLevel),
     alphaCodes,
   };
 }
@@ -171,10 +148,10 @@ export function serialize(tables: BorderTables): Uint8Array {
   }
   const codes = new TextEncoder().encode(tables.alphaCodes.join("\n"));
   const counts: Counts = {
-    featureCount: tables.featureCount,
-    polygonCount: tables.polygonCount,
-    ringCount: tables.ringCount,
-    vertexCount: tables.vertexCount,
+    featureCount: tables.alphaCodes.length,
+    polygonCount: tables.polyRingStart.length - 1,
+    ringCount: tables.ringOffsets.length - 1,
+    vertexCount: tables.coords.length / 2,
     codesByteLength: codes.length,
   };
   const at = layout(counts);
@@ -204,6 +181,20 @@ export function serialize(tables: BorderTables): Uint8Array {
   return out;
 }
 
+function checkOffsets(name: string, offsets: Uint32Array, end: number): void {
+  if (offsets[0] !== 0) {
+    throw new BordersFormatError(`${name} does not start at 0`);
+  }
+  for (let i = 1; i < offsets.length; i++) {
+    if (offsets[i] < offsets[i - 1]) {
+      throw new BordersFormatError(`${name} decreases at index ${i}`);
+    }
+  }
+  if (offsets[offsets.length - 1] !== end) {
+    throw new BordersFormatError(`${name} ends at ${offsets[offsets.length - 1]}, expected ${end}`);
+  }
+}
+
 export function deserialize(bytes: Uint8Array): BorderTables {
   if (!isLittleEndian()) {
     throw new BordersFormatError("Big-endian platforms are not supported");
@@ -211,11 +202,11 @@ export function deserialize(bytes: Uint8Array): BorderTables {
   if (bytes.length < HEADER_BYTES) {
     throw new BordersFormatError(`Borders data too short: ${bytes.length} bytes`);
   }
-  const aligned = bytes.byteOffset % 8 === 0 ? bytes : bytes.slice();
-  const view = new DataView(aligned.buffer, aligned.byteOffset, aligned.byteLength);
+  const own = new Uint8Array(bytes);
+  const view = new DataView(own.buffer);
 
   for (let i = 0; i < MAGIC.length; i++) {
-    if (aligned[i] !== MAGIC[i]) {
+    if (own[i] !== MAGIC[i]) {
       throw new BordersFormatError("Not a borders file: bad magic");
     }
   }
@@ -231,31 +222,33 @@ export function deserialize(bytes: Uint8Array): BorderTables {
     codesByteLength: view.getUint32(24, true),
   };
   const at = layout(counts);
-  if (aligned.length !== at.total) {
-    throw new BordersFormatError(`Borders data is ${aligned.length} bytes, header implies ${at.total}`);
+  if (own.length !== at.total) {
+    throw new BordersFormatError(`Borders data is ${own.length} bytes, header implies ${at.total}`);
   }
 
-  const base = aligned.buffer;
-  const origin = aligned.byteOffset;
   const { featureCount, polygonCount, ringCount, vertexCount } = counts;
-  const codesText = new TextDecoder().decode(aligned.subarray(at.codes, at.codes + counts.codesByteLength));
+  const codesText = new TextDecoder().decode(own.subarray(at.codes, at.codes + counts.codesByteLength));
   const alphaCodes = codesText.length === 0 ? [] : codesText.split("\n");
   if (alphaCodes.length !== featureCount) {
     throw new BordersFormatError(`Found ${alphaCodes.length} alpha codes for ${featureCount} features`);
   }
 
+  const base = own.buffer;
+  const featurePolyStart = new Uint32Array(base, at.featurePolyStart, featureCount + 1);
+  const polyRingStart = new Uint32Array(base, at.polyRingStart, polygonCount + 1);
+  const ringOffsets = new Uint32Array(base, at.ringOffsets, ringCount + 1);
+  checkOffsets("Feature-to-polygon table", featurePolyStart, polygonCount);
+  checkOffsets("Polygon-to-ring table", polyRingStart, ringCount);
+  checkOffsets("Ring-to-vertex table", ringOffsets, vertexCount);
+
   return {
-    featureCount,
-    polygonCount,
-    ringCount,
-    vertexCount,
-    coords: new Float64Array(base, origin + at.coords, vertexCount * 2),
-    area: new Float64Array(base, origin + at.area, featureCount),
-    bbox: new Float64Array(base, origin + at.bbox, featureCount * 4),
-    featurePolyStart: new Uint32Array(base, origin + at.featurePolyStart, featureCount + 1),
-    polyRingStart: new Uint32Array(base, origin + at.polyRingStart, polygonCount + 1),
-    ringOffsets: new Uint32Array(base, origin + at.ringOffsets, ringCount + 1),
-    adminLevel: new Uint8Array(base, origin + at.adminLevel, featureCount),
+    coords: new Float64Array(base, at.coords, vertexCount * 2),
+    area: new Float64Array(base, at.area, featureCount),
+    bbox: new Float64Array(base, at.bbox, featureCount * 4),
+    featurePolyStart,
+    polyRingStart,
+    ringOffsets,
+    adminLevel: new Uint8Array(base, at.adminLevel, featureCount),
     alphaCodes,
   };
 }
