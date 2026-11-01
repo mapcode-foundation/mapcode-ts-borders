@@ -35,6 +35,8 @@ best?.getCodeWithTerritory();
 
 Lookups take about 60 µs. `Borders` is read-only after loading, so share it between requests.
 
+`Borders.fromBytes` copies its input, so you can reuse, overwrite or release the buffer afterwards. A `Borders` instance cannot be posted to a worker thread. Load the file in each worker instead.
+
 ## Ranking an existing list of mapcodes
 
 If you already have mapcodes, for example from `encodeRestrictToCountryISO`, rank them yourself.
@@ -65,13 +67,19 @@ The file is about 18 MB compressed. Serve it with gzip or brotli, and load it la
 ## API
 
 `Borders.fromBytes(bytes: Uint8Array): Borders`
-Parses a `.mcb` file. Throws `BordersFormatError` for a malformed file or an alpha code that `mapcode-ts` does not know.
+Parses a `.mcb` file. Throws `BordersFormatError` for a malformed file, invalid metadata, or an alpha code that `mapcode-ts` does not know.
 
 `borders.getTerritories(latDeg, lonDeg)` or `borders.getTerritories(point): BorderMatch[]`
-All territories containing the point, ranked by admin level descending, then area ascending, then file order. Each `BorderMatch` has `territory`, `adminLevel` and `area`. Longitudes outside [-180, 180) are wrapped.
+All territories containing the point, ranked by admin level descending, then area ascending, then file order. Longitudes outside [-180, 180) are wrapped. Each `BorderMatch` has:
+- `territory`, the `mapcode-ts` territory.
+- `adminLevel`, the OpenStreetMap `admin_level` of the border: 2 for a country, 4 for a first-level subdivision.
+- `area`, the planar area in square degrees of the simplified polygon. It only ranks overlapping borders of the same level and is not a real-world area.
 
 `borders.getCountry(latDeg, lonDeg)` or `borders.getCountry(point): Territory | null`
 The top match, lifted to its parent when it is a subdivision. `null` when nothing matches.
+
+`borders.getSource(): BordersSource`
+Where the data came from, as a frozen `{ name, snapshotDate }`. The date is ISO 8601 with month or day precision, for example `"2026-05"`.
 
 `rankByBorders(mapcodes, matches): { mapcodes, best }`
 Described above. Territories are compared by `toString()`.
@@ -82,20 +90,33 @@ Runs `encode()`, looks up the borders and ranks. Returns `{ mapcodes, best, terr
 `bordersUrl: URL`
 Location of the bundled `borders.mcb`.
 
+## Data
+
+The borders come from the OpenStreetMap planet. They are the boundary relations with `admin_level` 2 (countries) and 4 (first-level subdivisions). The file is built by `tools/build-borders.py` in [mapcode-foundation/mapcode-rest-service](https://github.com/mapcode-foundation/mapcode-rest-service). That script exports the relations with osmium, maps their ISO 3166 tags to mapcode alpha codes and simplifies the geometry with Douglas-Peucker. The shipped file is the `borders-100m.fgb` variant of that pipeline.
+
+The snapshot is the May 2026 weekly planet, built on 2026-05-27. The exact planet week was not recorded, so the file says `2026-05`. `borders.getSource()` returns `{ name: "OpenStreetMap", snapshotDate: "2026-05" }`.
+
+For the next refresh, record the planet's timestamp. osmium reads it from the PBF header. Pass it to the converter as `--snapshot-date`.
+
+Contains information from OpenStreetMap, (C) OpenStreetMap contributors, available under the [Open Database License (ODbL) 1.0](https://www.openstreetmap.org/copyright). The code is licensed under Apache-2.0.
+
 ## Regenerating the data
 
 The `.mcb` file is generated from a FlatGeobuf file of OSM admin borders.
 
 ```
-npm run gen:borders -- path/to/borders.fgb data/borders.mcb
+npm run gen:borders -- path/to/borders.fgb data/borders.mcb --snapshot-date 2026-05
 ```
 
-Each feature needs the properties `alphaCode`, `adminLevel` and `area`, and a Polygon or MultiPolygon geometry. The script exits non-zero and lists every feature whose alpha code `mapcode-ts` does not parse back identically, or whose `parentAlphaCode` differs from the parent `mapcode-ts` knows.
+`--snapshot-date` is required, as `YYYY-MM` or `YYYY-MM-DD`. `--source <name>` sets the source name and defaults to `OpenStreetMap`.
+
+Each feature needs the properties `alphaCode`, `adminLevel` and `area`, and a Polygon or MultiPolygon geometry. The script writes nothing and exits non-zero, listing every offender, when a feature has:
+- a missing, unknown or non-canonical `alphaCode`, or one that appears twice;
+- a `parentAlphaCode` that differs from the parent `mapcode-ts` knows;
+- an `adminLevel` that is not an integer from 0 to 255, or an `area` that is not finite;
+- a missing geometry, or one that is not a Polygon or MultiPolygon;
+- a coordinate that is not finite, or outside longitude [-180, 180] or latitude [-90, 90].
 
 ## File format
 
-Little-endian. A 32-byte header (magic `MCBD`, format version 1, and the feature, polygon, ring and vertex counts, the byte length of the codes section, and a reserved word) is followed by these sections, each starting on an 8-byte boundary: vertex coordinates (lon, lat as float64), feature areas, feature bounding boxes, and the feature-to-polygon, polygon-to-ring and ring-to-vertex offsets as uint32. After those come the admin levels as uint8 and the alpha codes as newline-separated UTF-8. The reader maps typed arrays straight onto the buffer, so loading is a copy-free parse. `src/format.ts` is the definition.
-
-## Data attribution
-
-The border data is derived from OpenStreetMap. Contains information from OpenStreetMap, (C) OpenStreetMap contributors, available under the [Open Database License (ODbL) 1.0](https://www.openstreetmap.org/copyright). The code is licensed under Apache-2.0.
+Little-endian. A 32-byte header holds the magic `MCBD`, format version 1, the feature, polygon, ring and vertex counts, the byte length of the codes section and the byte length of the metadata section. The sections follow, each starting on an 8-byte boundary: vertex coordinates, feature areas and bounding boxes, the offset tables, admin levels and the alpha codes. The last section is the metadata, a UTF-8 JSON object with the source name and snapshot date. The reader validates the layout, the offset tables and the metadata when it loads. `src/format.ts` is the definition.
