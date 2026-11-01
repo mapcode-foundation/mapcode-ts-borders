@@ -21,5 +21,14 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   target: "es2020",
-  shims: true,
+  esbuildOptions(options, { format }) {
+    if (format === "cjs") {
+      // tsup's own shim builds the URL as `file:${__filename}`, which breaks on a path containing # or %.
+      options.define = { ...options.define, "import.meta.url": "__importMetaUrl" };
+      options.banner = {
+        ...options.banner,
+        js: '"use strict";\nconst __importMetaUrl = require("node:url").pathToFileURL(__filename).href;',
+      };
+    }
+  },
 });
