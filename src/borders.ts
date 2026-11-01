@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Point, Territory } from "mapcode-ts";
+import type { Point, Territory } from "mapcode-ts";
 import { parseAlphaCode } from "./alpha-code.js";
 import { BordersFormatError, deserialize, type BorderTables, type BordersSource } from "./format.js";
 
@@ -22,6 +22,7 @@ export interface BorderMatch {
   readonly area: number;
 }
 
+// Must stay arithmetically identical to the REST service's BoundaryService.pointInRing, so lookups match it exactly.
 export function pointInRing(
   coords: Float64Array,
   startVertex: number,
@@ -50,6 +51,11 @@ export function pointInRing(
     }
   }
   return inside;
+}
+
+// Reads a Point through its getters: instanceof fails for a Point from a second installed copy of mapcode-ts.
+function latLon(arg0: number | Point, arg1?: number): [number, number] {
+  return typeof arg0 === "number" ? [arg0, arg1 as number] : [arg0.getLatDeg(), arg0.getLonDeg()];
 }
 
 function wrapLon(lonDeg: number): number {
@@ -86,7 +92,7 @@ export class Borders {
   getTerritories(latDeg: number, lonDeg: number): BorderMatch[];
   getTerritories(point: Point): BorderMatch[];
   getTerritories(arg0: number | Point, arg1?: number): BorderMatch[] {
-    const [lat, rawLon] = arg0 instanceof Point ? [arg0.getLatDeg(), arg0.getLonDeg()] : [arg0, arg1 as number];
+    const [lat, rawLon] = latLon(arg0, arg1);
     const lon = wrapLon(rawLon);
     const { bbox, adminLevel, area } = this.tables;
     const featureCount = this.territories.length;
@@ -103,7 +109,8 @@ export class Borders {
   getCountry(latDeg: number, lonDeg: number): Territory | null;
   getCountry(point: Point): Territory | null;
   getCountry(arg0: number | Point, arg1?: number): Territory | null {
-    const matches = arg0 instanceof Point ? this.getTerritories(arg0) : this.getTerritories(arg0, arg1 as number);
+    const [lat, lon] = latLon(arg0, arg1);
+    const matches = this.getTerritories(lat, lon);
     if (matches.length === 0) return null;
     const top = matches[0].territory;
     return top.getParentTerritory() ?? top;

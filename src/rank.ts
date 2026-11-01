@@ -27,19 +27,23 @@ export interface BorderedEncoding extends RankedMapcodes {
 export function rankByBorders(mapcodes: readonly Mapcode[], matches: readonly BorderMatch[]): RankedMapcodes {
   const rank = new Map<string, number>();
   matches.forEach((m, i) => {
+    // By name: territories from two installed copies of mapcode-ts are never the same object.
     const key = m.territory.toString();
     if (!rank.has(key)) rank.set(key, i);
   });
-  const rankOf = (m: Mapcode): number => rank.get(m.getTerritory().toString()) ?? Infinity;
+  const rankOf = (m: Mapcode): number => rank.get(m.getTerritory().toString()) ?? matches.length;
 
-  const ranked = mapcodes
-    .map((mapcode, i) => ({ mapcode, i, r: rankOf(mapcode) }))
-    .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r < b.r ? -1 : 1))
-    .map((e) => e.mapcode);
-
-  const top = matches.length === 0 ? null : matches[0].territory.toString();
-  const best = top === null ? null : ranked.find((m) => m.getTerritory().toString() === top) ?? null;
+  const ranked = [...mapcodes].sort((a, b) => rankOf(a) - rankOf(b));
+  const best = matches.length > 0 && ranked.length > 0 && rankOf(ranked[0]) === 0 ? ranked[0] : null;
   return { mapcodes: ranked, best };
+}
+
+// encode() checks instanceof Point, which fails for a Point from a second installed copy of mapcode-ts.
+type PointLike = Pick<Point, "getLatDeg" | "getLonDeg"> & Partial<Pick<Point, "isDefined">>;
+
+function ownPoint(point: PointLike): Point {
+  if (point instanceof Point) return point;
+  return point.isDefined?.() === false ? Point.undefined() : Point.fromDeg(point.getLatDeg(), point.getLonDeg());
 }
 
 export function encodeWithBorders(
@@ -59,22 +63,16 @@ export function encodeWithBorders(
   arg2?: Borders | Territory | null,
   arg3?: Territory | null,
 ): BorderedEncoding {
-  let latDeg: number;
-  let lonDeg: number;
-  let borders: Borders;
-  let restrict: Territory | null;
-  if (arg0 instanceof Point) {
-    latDeg = arg0.getLatDeg();
-    lonDeg = arg0.getLonDeg();
-    borders = arg1 as Borders;
-    restrict = (arg2 as Territory | null | undefined) ?? null;
+  let territories: BorderMatch[];
+  let mapcodes: Mapcode[];
+  if (typeof arg0 === "number") {
+    const borders = arg2 as Borders;
+    territories = borders.getTerritories(arg0, arg1 as number);
+    mapcodes = encode(arg0, arg1 as number, arg3 ?? null);
   } else {
-    latDeg = arg0;
-    lonDeg = arg1 as number;
-    borders = arg2 as Borders;
-    restrict = arg3 ?? null;
+    const borders = arg1 as Borders;
+    territories = borders.getTerritories(arg0);
+    mapcodes = encode(ownPoint(arg0), (arg2 as Territory | null | undefined) ?? null);
   }
-  const territories = borders.getTerritories(latDeg, lonDeg);
-  const ranked = rankByBorders(encode(latDeg, lonDeg, restrict), territories);
-  return { ...ranked, territories };
+  return { ...rankByBorders(mapcodes, territories), territories };
 }

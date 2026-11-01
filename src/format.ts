@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// This file must have no imports: scripts/convert-borders.mts loads it under node --experimental-strip-types.
+
 export interface BorderFeature {
   alphaCode: string;
   adminLevel: number;
