@@ -18,11 +18,13 @@ import { Borders, BordersFormatError } from "../src/index.js";
 import { pointInRing } from "../src/borders.js";
 import { buildTables, serialize, type BorderFeature } from "../src/format.js";
 
+const source = { name: "OpenStreetMap", snapshotDate: "2026-05" };
+
 const box = (west: number, south: number, east: number, north: number): number[][] => [
   [west, south], [east, south], [east, north], [west, north], [west, south],
 ];
 
-const make = (features: BorderFeature[]): Borders => Borders.fromBytes(serialize(buildTables(features)));
+const make = (features: BorderFeature[]): Borders => Borders.fromBytes(serialize(buildTables(features, source)));
 const codes = (b: Borders, lat: number, lon: number): string[] =>
   b.getTerritories(lat, lon).map((m) => m.territory.toString());
 
@@ -136,7 +138,7 @@ describe("Borders.fromBytes", () => {
   it("rejects an unknown territory code, naming it", () => {
     const bytes = serialize(buildTables([
       { alphaCode: "QQQ-ZZ", adminLevel: 2, area: 1, polygons: [[box(0, 0, 1, 1)]] },
-    ]));
+    ], source));
     expect(() => Borders.fromBytes(bytes)).toThrow(BordersFormatError);
     expect(() => Borders.fromBytes(bytes)).toThrow(/QQQ-ZZ/);
   });

@@ -13,18 +13,32 @@
 // limitations under the License.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { parseArgs } from "node:util";
 import { geojson } from "flatgeobuf";
 import { Territory } from "mapcode-ts";
-import { buildTables, serialize, type BorderFeature } from "../src/format.ts";
+import { buildTables, serialize, SNAPSHOT_DATE_PATTERN, type BorderFeature } from "../src/format.ts";
 
 interface GeoJsonFeature {
   geometry: { type: string; coordinates: unknown } | null;
   properties: Record<string, unknown> | null;
 }
 
-const [inPath, outPath] = process.argv.slice(2);
-if (!inPath || !outPath) {
-  console.error("Usage: convert-borders.mts <in.fgb> <out.mcb>");
+const usage = "Usage: convert-borders.mts <in.fgb> <out.mcb> --snapshot-date <YYYY-MM[-DD]> [--source <name>]";
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    "snapshot-date": { type: "string" },
+    source: { type: "string", default: "OpenStreetMap" },
+  },
+});
+const [inPath, outPath] = positionals;
+const snapshotDate = values["snapshot-date"];
+if (!inPath || !outPath || positionals.length > 2) {
+  console.error(usage);
+  process.exit(2);
+}
+if (snapshotDate === undefined || !SNAPSHOT_DATE_PATTERN.test(snapshotDate)) {
+  console.error(`--snapshot-date must be an ISO 8601 date, YYYY-MM or YYYY-MM-DD\n${usage}`);
   process.exit(2);
 }
 
@@ -72,7 +86,7 @@ if (offenders.length > 0) {
   process.exit(1);
 }
 
-const tables = buildTables(features);
+const tables = buildTables(features, { name: values.source, snapshotDate });
 const bytes = serialize(tables);
 writeFileSync(outPath, bytes);
 console.log(`Wrote ${outPath}: ${tables.alphaCodes.length} features, ${tables.coords.length / 2} vertices, ${bytes.length} bytes`);

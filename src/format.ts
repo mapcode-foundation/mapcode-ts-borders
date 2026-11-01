@@ -19,7 +19,13 @@ export interface BorderFeature {
   polygons: number[][][][];
 }
 
+export interface BordersSource {
+  readonly name: string;
+  readonly snapshotDate: string;
+}
+
 export interface BorderTables {
+  source: BordersSource;
   coords: Float64Array;
   area: Float64Array;
   bbox: Float64Array;
@@ -37,6 +43,8 @@ export class BordersFormatError extends Error {
   }
 }
 
+export const SNAPSHOT_DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/;
+
 const MAGIC = [0x4d, 0x43, 0x42, 0x44];
 const FORMAT_VERSION = 1;
 const HEADER_BYTES = 32;
@@ -47,6 +55,7 @@ interface Counts {
   ringCount: number;
   vertexCount: number;
   codesByteLength: number;
+  metaByteLength: number;
 }
 
 interface Layout {
@@ -58,6 +67,7 @@ interface Layout {
   ringOffsets: number;
   adminLevel: number;
   codes: number;
+  meta: number;
   total: number;
 }
 
@@ -72,17 +82,44 @@ function layout(c: Counts): Layout {
   const ringOffsets = align8(polyRingStart + (c.polygonCount + 1) * 4);
   const adminLevel = align8(ringOffsets + (c.ringCount + 1) * 4);
   const codes = align8(adminLevel + c.featureCount);
+  const meta = codes + c.codesByteLength;
   return {
-    coords, area, bbox, featurePolyStart, polyRingStart, ringOffsets, adminLevel, codes,
-    total: codes + c.codesByteLength,
+    coords, area, bbox, featurePolyStart, polyRingStart, ringOffsets, adminLevel, codes, meta,
+    total: meta + c.metaByteLength,
   };
+}
+
+function checkSource(source: BordersSource): void {
+  if (typeof source.name !== "string" || source.name.length === 0) {
+    throw new BordersFormatError("Borders source name must be a non-empty string");
+  }
+  if (typeof source.snapshotDate !== "string" || !SNAPSHOT_DATE_PATTERN.test(source.snapshotDate)) {
+    throw new BordersFormatError(`Borders snapshot date is not an ISO 8601 date (YYYY-MM or YYYY-MM-DD): ${source.snapshotDate}`);
+  }
+}
+
+function parseSource(json: string): BordersSource {
+  let meta: unknown;
+  try {
+    meta = JSON.parse(json);
+  } catch {
+    throw new BordersFormatError("Borders metadata is not valid JSON");
+  }
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) {
+    throw new BordersFormatError("Borders metadata is not a JSON object");
+  }
+  const { source, snapshotDate } = meta as Record<string, unknown>;
+  const result = { name: source as string, snapshotDate: snapshotDate as string };
+  checkSource(result);
+  return result;
 }
 
 function isLittleEndian(): boolean {
   return new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 }
 
-export function buildTables(features: readonly BorderFeature[]): BorderTables {
+export function buildTables(features: readonly BorderFeature[], source: BordersSource): BorderTables {
+  checkSource(source);
   const coords: number[] = [];
   const ringOffsets: number[] = [0];
   const polyRingStart: number[] = [0];
@@ -131,6 +168,7 @@ export function buildTables(features: readonly BorderFeature[]): BorderTables {
   }
 
   return {
+    source: { name: source.name, snapshotDate: source.snapshotDate },
     coords: Float64Array.from(coords),
     area: Float64Array.from(area),
     bbox: Float64Array.from(bbox),
@@ -146,13 +184,16 @@ export function serialize(tables: BorderTables): Uint8Array {
   if (!isLittleEndian()) {
     throw new BordersFormatError("Big-endian platforms are not supported");
   }
-  const codes = new TextEncoder().encode(tables.alphaCodes.join("\n"));
+  const encoder = new TextEncoder();
+  const codes = encoder.encode(tables.alphaCodes.join("\n"));
+  const meta = encoder.encode(JSON.stringify({ source: tables.source.name, snapshotDate: tables.source.snapshotDate }));
   const counts: Counts = {
     featureCount: tables.alphaCodes.length,
     polygonCount: tables.polyRingStart.length - 1,
     ringCount: tables.ringOffsets.length - 1,
     vertexCount: tables.coords.length / 2,
     codesByteLength: codes.length,
+    metaByteLength: meta.length,
   };
   const at = layout(counts);
   const out = new Uint8Array(at.total);
@@ -165,7 +206,7 @@ export function serialize(tables: BorderTables): Uint8Array {
   view.setUint32(16, counts.ringCount, true);
   view.setUint32(20, counts.vertexCount, true);
   view.setUint32(24, counts.codesByteLength, true);
-  view.setUint32(28, 0, true);
+  view.setUint32(28, counts.metaByteLength, true);
 
   const put = (offset: number, data: ArrayBufferView): void => {
     out.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), offset);
@@ -178,6 +219,7 @@ export function serialize(tables: BorderTables): Uint8Array {
   put(at.ringOffsets, tables.ringOffsets);
   put(at.adminLevel, tables.adminLevel);
   out.set(codes, at.codes);
+  out.set(meta, at.meta);
   return out;
 }
 
@@ -220,6 +262,7 @@ export function deserialize(bytes: Uint8Array): BorderTables {
     ringCount: view.getUint32(16, true),
     vertexCount: view.getUint32(20, true),
     codesByteLength: view.getUint32(24, true),
+    metaByteLength: view.getUint32(28, true),
   };
   const at = layout(counts);
   if (own.length !== at.total) {
@@ -233,6 +276,8 @@ export function deserialize(bytes: Uint8Array): BorderTables {
     throw new BordersFormatError(`Found ${alphaCodes.length} alpha codes for ${featureCount} features`);
   }
 
+  const source = parseSource(new TextDecoder().decode(own.subarray(at.meta, at.total)));
+
   const base = own.buffer;
   const featurePolyStart = new Uint32Array(base, at.featurePolyStart, featureCount + 1);
   const polyRingStart = new Uint32Array(base, at.polyRingStart, polygonCount + 1);
@@ -242,6 +287,7 @@ export function deserialize(bytes: Uint8Array): BorderTables {
   checkOffsets("Ring-to-vertex table", ringOffsets, vertexCount);
 
   return {
+    source,
     coords: new Float64Array(base, at.coords, vertexCount * 2),
     area: new Float64Array(base, at.area, featureCount),
     bbox: new Float64Array(base, at.bbox, featureCount * 4),

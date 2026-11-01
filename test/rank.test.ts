@@ -24,6 +24,8 @@ const match = (code: string, adminLevel = 2, area = 1): BorderMatch => ({
 });
 
 
+const source = { name: "OpenStreetMap", snapshotDate: "2026-05" };
+
 const baarle = encode(51.4436, 4.9326);
 const labels = (list: readonly Mapcode[]): string[] => list.map((m) => m.getCodeWithTerritory());
 
@@ -78,7 +80,7 @@ describe("encodeWithBorders", () => {
   const box = [[4, 51], [6, 51], [6, 52], [4, 52], [4, 51]];
   const borders = Borders.fromBytes(serialize(buildTables([
     { alphaCode: "NLD", adminLevel: 2, area: 10, polygons: [[box]] },
-  ])));
+  ], source)));
 
   it("ranks the encoding by the borders and returns the matches", () => {
     const result = encodeWithBorders(51.4436, 4.9326, borders);

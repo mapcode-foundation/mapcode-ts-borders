@@ -15,6 +15,7 @@
 export { Borders } from "./borders.js";
 export type { BorderMatch } from "./borders.js";
 export { BordersFormatError } from "./format.js";
+export type { BordersSource } from "./format.js";
 export { rankByBorders, encodeWithBorders } from "./rank.js";
 export type { RankedMapcodes, BorderedEncoding } from "./rank.js";
 export { bordersUrl } from "./data-url.js";

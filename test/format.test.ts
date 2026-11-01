@@ -15,6 +15,8 @@
 import { describe, expect, it } from "vitest";
 import { BordersFormatError, buildTables, deserialize, serialize, type BorderFeature } from "../src/format.js";
 
+const source = { name: "OpenStreetMap", snapshotDate: "2026-05" };
+
 const square = (x: number, y: number, size: number): number[][] => [
   [x, y], [x + size, y], [x + size, y + size], [x, y + size], [x, y],
 ];
@@ -25,11 +27,11 @@ const features: BorderFeature[] = [
   { alphaCode: "BEL", adminLevel: 2, area: 7, polygons: [[square(50, 50, 3)]] },
 ];
 
-const bytes = (): Uint8Array => serialize(buildTables(features));
+const bytes = (): Uint8Array => serialize(buildTables(features, source));
 
 describe("borders format", () => {
   it("round trips every table", () => {
-    const original = buildTables(features);
+    const original = buildTables(features, source);
     const copy = deserialize(serialize(original));
     expect(copy).toEqual(original);
     expect(copy.alphaCodes.length).toBe(3);
@@ -43,14 +45,14 @@ describe("borders format", () => {
     backing.set(good, 1);
     const misaligned = backing.subarray(1);
     expect(misaligned.byteOffset % 8).toBe(1);
-    expect(deserialize(misaligned)).toEqual(buildTables(features));
+    expect(deserialize(misaligned)).toEqual(buildTables(features, source));
   });
 
   it("reads a view into a larger aligned buffer", () => {
     const good = bytes();
     const backing = new Uint8Array(good.length + 16);
     backing.set(good, 8);
-    expect(deserialize(backing.subarray(8, 8 + good.length))).toEqual(buildTables(features));
+    expect(deserialize(backing.subarray(8, 8 + good.length))).toEqual(buildTables(features, source));
   });
 
   it("rejects bad magic", () => {
@@ -76,23 +78,23 @@ describe("borders format", () => {
   });
 
   it("rejects a code count that does not match the feature count", () => {
-    const bad = bytes();
-    bad[bad.length - 4] = 0x2b;
-    expect(() => deserialize(bad)).toThrow(/2 alpha codes for 3 features/);
+    const tables = buildTables(features.slice(0, 2), source);
+    const bad = serialize({ ...tables, alphaCodes: ["NLD", "US-CA\nBEL"] });
+    expect(() => deserialize(bad)).toThrow(/3 alpha codes for 2 features/);
   });
 
   it("skips features and polygons without vertices", () => {
     const tables = buildTables([
       { alphaCode: "BAD", adminLevel: 2, area: 1, polygons: [[[]], [[]]] },
       { alphaCode: "NLD", adminLevel: 2, area: 100, polygons: [[[]], [square(0, 0, 10)]] },
-    ]);
+    ], source);
     expect(tables.alphaCodes).toEqual(["NLD"]);
     expect(tables.polyRingStart.length - 1).toBe(1);
     expect(tables.ringOffsets.length - 1).toBe(1);
   });
 
   it("refuses to build from no usable feature", () => {
-    expect(() => buildTables([])).toThrow(BordersFormatError);
-    expect(() => buildTables([{ alphaCode: "BAD", adminLevel: 2, area: 1, polygons: [[[]]] }])).toThrow(BordersFormatError);
+    expect(() => buildTables([], source)).toThrow(BordersFormatError);
+    expect(() => buildTables([{ alphaCode: "BAD", adminLevel: 2, area: 1, polygons: [[[]]] }], source)).toThrow(BordersFormatError);
   });
 });

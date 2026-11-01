@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { Point, Territory } from "mapcode-ts";
-import { BordersFormatError, deserialize, type BorderTables } from "./format.js";
+import { BordersFormatError, deserialize, type BorderTables, type BordersSource } from "./format.js";
 
 export interface BorderMatch {
   readonly territory: Territory;
@@ -57,10 +57,14 @@ function wrapLon(lonDeg: number): number {
 }
 
 export class Borders {
+  private readonly source: BordersSource;
+
   private constructor(
     private readonly tables: BorderTables,
     private readonly territories: readonly Territory[],
-  ) {}
+  ) {
+    this.source = Object.freeze({ ...tables.source });
+  }
 
   static fromBytes(bytes: Uint8Array): Borders {
     const tables = deserialize(bytes);
@@ -72,6 +76,10 @@ export class Borders {
       }
     });
     return new Borders(tables, territories);
+  }
+
+  getSource(): BordersSource {
+    return this.source;
   }
 
   getTerritories(latDeg: number, lonDeg: number): BorderMatch[];
